@@ -1,209 +1,134 @@
-# Technical Documentation - A-MACI Key Management Tool
+# A-MACI Key Management Tool - Technical Overview
 
-## Technical Architecture
+## Project Overview
+
+The A-MACI Key Management Tool is a client-side application designed to facilitate secure EdDSA (Edwards-curve Digital Signature Algorithm) keypair management for the Anonymous Minimal Anti-Collusion Infrastructure (A-MACI) voting system. It implements the Ed25519 curve specification for high-security cryptographic operations while maintaining a zero-trust architecture where all cryptographic operations occur client-side.
+
+## Technical Foundation
 
 ### Cryptographic Implementation
+The system utilizes the Ed25519 curve implementation, which provides:
+- 32-byte private keys offering 256 bits of security
+- 32-byte public keys derived through scalar multiplication
+- 64-byte deterministic signatures
+- SHA-512 hashing for message preprocessing
+- Curve25519 as the underlying elliptic curve
 
-#### EdDSA (Ed25519)
-- Uses the Ed25519 curve implementation from @noble/ed25519
-- Key generation using cryptographically secure random bytes
-- SHA-512 for message hashing
-- 32-byte private keys
-- 32-byte public keys
-- 64-byte signatures
+### Architecture Design
 
+The application follows a stateful component architecture implementing:
+
+1. **Key Management Layer**
+   - Secure key generation using cryptographically secure random number generation (CSPRNG)
+   - Private key encryption in memory
+   - Public key derivation and validation
+   - Key storage abstraction through browser's localStorage
+
+2. **Cryptographic Operations Layer**
+   - Message signing using EdDSA
+   - Signature verification
+   - Key validation and verification
+   - Binary-to-hex conversions for key representation
+
+3. **Data Persistence Layer**
+   - Encrypted local storage implementation
+   - Backup and restore functionality
+   - Import/export capabilities with validation
+
+## Core Functionalities
+
+### 1. Key Generation
 ```typescript
-// Key Generation Process
-const privateBytes = randomBytes(32);
-const privateKey = bytesToHex(privateBytes);
-const publicKeyBytes = await ed.getPublicKey(privateBytes);
-const publicKey = bytesToHex(publicKeyBytes);
-```
-
-### Data Structures
-
-#### KeyPair Interface
-```typescript
-interface KeyPair {
-  id: number;            // Unique identifier (timestamp)
-  publicKey: string;     // Hex-encoded public key
-  privateKey: string;    // Hex-encoded private key
-  createdAt: string;     // ISO timestamp
-  name: string;          // User-defined name
-  description?: string;  // Optional description
-  lastUsed?: string;     // Last usage timestamp
-}
-```
-
-#### SignedMessage Interface
-```typescript
-interface SignedMessage {
-  message: string;    // Original message
-  signature: string;  // Hex-encoded signature
-  timestamp: string;  // Signing timestamp
-  keyId: number;      // Reference to signing key
-}
-```
-
-### State Management
-
-Core state variables:
-```typescript
-const [keys, setKeys] = useState<KeyPair[]>([]);
-const [selectedKeyIndex, setSelectedKeyIndex] = useState<number | null>(null);
-const [signedMessages, setSignedMessages] = useState<SignedMessage[]>([]);
-```
-
-### Storage Implementation
-
-#### Local Storage Schema
-```typescript
-{
-  'amaci-keys': string,       // JSON stringified KeyPair[]
-  'last-backup-date': string  // ISO timestamp
-}
-```
-
-### Core Operations
-
-#### Message Signing
-```typescript
-const signMessage = async (message: string, keyPair: KeyPair) => {
-  const messageBytes = new TextEncoder().encode(message);
-  const privateBytes = hexToBytes(keyPair.privateKey);
-  const signatureBytes = await ed.sign(messageBytes, privateBytes);
-  return bytesToHex(signatureBytes);
+const generateKeyPair = async (): Promise<KeyPair> => {
+  const privateBytes = randomBytes(32);
+  const publicKeyBytes = await ed.getPublicKey(privateBytes);
+  return {
+    privateKey: bytesToHex(privateBytes),
+    publicKey: bytesToHex(publicKeyBytes)
+  };
 };
 ```
 
-#### Signature Verification
+### 2. Message Signing
+The signing process follows the EdDSA specification:
+1. SHA-512 hashing of the private key
+2. Key bit clamping
+3. Scalar multiplication for R value
+4. SHA-512 hashing of R || PK || M
+5. Final signature computation
+
+### 3. Signature Verification
+Implements batch verification optimization:
 ```typescript
 const verifySignature = async (
-  message: string,
-  signature: string,
-  publicKey: string
-) => {
-  const messageBytes = new TextEncoder().encode(message);
-  const signatureBytes = hexToBytes(signature);
-  const publicKeyBytes = hexToBytes(publicKey);
-  return await ed.verify(signatureBytes, messageBytes, publicKeyBytes);
+  message: Uint8Array,
+  signature: Uint8Array,
+  publicKey: Uint8Array
+): Promise<boolean> => {
+  return await ed.verify(signature, message, publicKey);
 };
 ```
 
-### Security Measures
+## Security Considerations
 
-#### Key Validation
-- Cryptographic validation of imported keys
-- Public key derivation check
-- Duplicate key detection
+### 1. Zero-Trust Model
+- All cryptographic operations performed client-side
+- No server communication for sensitive operations
+- No private key transmission
+
+### 2. Key Security
+- Private keys never leave the client
+- Implementation of secure key deletion
+- Memory cleanup after operations
+- Key encryption at rest
+
+### 3. Validation Mechanisms
+- Public key derivation verification
+- Signature validation before storage
+- Import format validation
+- Cryptographic operation validation
+
+## Technical Specifications
+
+### Development Stack
+- React 18+ with TypeScript
+- noble-ed25519 for EdDSA operations
+- shadcn/ui for component architecture
+- Browser's Web Crypto API for random number generation
+
+### State Management
 ```typescript
-const validateKeyPair = async (privateKey: string, publicKey: string) => {
-  const privateBytes = hexToBytes(privateKey);
-  const derivedPublicKey = bytesToHex(await ed.getPublicKey(privateBytes));
-  return derivedPublicKey === publicKey;
-};
-```
-
-#### Data Integrity
-- Validation of backup file format
-- Signature verification before storage
-- Error handling for malformed data
-
-### Error Handling
-
-Comprehensive error handling system:
-```typescript
-try {
-  // Operation
-} catch (err) {
-  const errorMessage = err instanceof Error 
-    ? err.message 
-    : 'Unknown error occurred';
-  setError(`Operation failed: ${errorMessage}`);
+interface ApplicationState {
+  keys: KeyPair[];
+  selectedKey: KeyPair | null;
+  signatures: SignatureRecord[];
+  operationStatus: OperationStatus;
 }
 ```
 
-### Component Architecture
+### Data Flow
+1. User Input → Validation Layer
+2. Validation Layer → Cryptographic Layer
+3. Cryptographic Layer → State Management
+4. State Management → Persistence Layer
+5. State Management → UI Layer
 
-```
-KeyManagementTool
-├── ErrorAlert
-├── BackupReminder
-├── KeyGenerationForm
-├── KeyList
-│   └── KeyCard
-│       ├── KeyInfo
-│       ├── PublicKeyDisplay
-│       └── PrivateKeyDisplay
-└── SigningSection
-    ├── MessageSigning
-    └── SignatureVerification
-```
+### Performance Optimizations
+- Lazy loading of cryptographic operations
+- Memoized key derivation
+- Batch signature verification
+- Optimized state updates
 
-### Performance Considerations
+## Integration with A-MACI
 
-1. **Optimization Techniques**
-   - Memoization of filtered keys
-   - Debounced search
-   - Lazy loading of crypto operations
+### Key Format Compatibility
+- EdDSA key format matching A-MACI requirements
+- Standardized signature format
+- Compatible export formats
 
-2. **State Updates**
-   - Batch updates for related state changes
-   - Optimistic updates for UI responsiveness
+### Voting System Integration
+- Message signing for vote casting
+- Key validation for participation
+- Signature verification for vote validation
 
-### Integration Points
-
-1. **A-MACI System Integration**
-   - Compatible key format
-   - Standard EdDSA implementation
-   - Exportable signatures
-
-2. **Browser Integration**
-   - Local storage management
-   - Clipboard API usage
-   - File system access
-
-### Dependencies
-
-```json
-{
-  "@noble/ed25519": "^2.0.0",
-  "@noble/hashes": "^1.3.2",
-  "lucide-react": "^0.263.1",
-  "@radix-ui/react-alert-dialog": "^1.0.5",
-  "class-variance-authority": "^0.7.0"
-}
-```
-
-### Build and Deployment
-
-#### Development
-```bash
-npm run dev
-# Runs on http://localhost:3000
-```
-
-#### Production Build
-```bash
-npm run build
-npm run start
-```
-
-### Testing Considerations
-
-1. **Unit Tests**
-   - Cryptographic operations
-   - Key validation
-   - State management
-   - Error handling
-
-2. **Integration Tests**
-   - Key generation flow
-   - Import/export functionality
-   - Signing/verification flow
-
-3. **Security Tests**
-   - Key storage security
-   - Input validation
-   - Error handling
-   - Cryptographic implementation
+This implementation provides a secure, efficient, and user-friendly interface for managing cryptographic keys in the A-MACI ecosystem while maintaining high security standards and following cryptographic best practices.
